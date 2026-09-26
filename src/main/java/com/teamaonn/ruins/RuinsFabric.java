@@ -19,6 +19,10 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.List;
 import java.util.ArrayList;
+import java.io.InputStream;
+import java.io.IOException;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 public final class RuinsFabric implements ModInitializer {
     static final Logger LOG = LoggerFactory.getLogger("ruins_fabric");
@@ -28,6 +32,7 @@ public final class RuinsFabric implements ModInitializer {
 
     @Override public void onInitialize() {
         directory = net.fabricmc.loader.api.FabricLoader.getInstance().getConfigDir().resolve("ruins_config");
+        installBundledTemplates();
         reload();
         ServerLifecycleEvents.SERVER_STARTED.register(server -> spawner.reset());
         ServerTickEvents.END_SERVER_TICK.register(spawner::tick);
@@ -58,6 +63,32 @@ public final class RuinsFabric implements ModInitializer {
                     return 1;
                 })));
         });
+    }
+
+    /** An optional personal template pack can be bundled without adding it to the public source. */
+    private static void installBundledTemplates() {
+        try (InputStream resource = RuinsFabric.class.getResourceAsStream("/ruins_defaults.zip")) {
+            if (resource == null) return;
+            int installed = 0;
+            Path root = directory.toAbsolutePath().normalize();
+            Files.createDirectories(root);
+            try (ZipInputStream zip = new ZipInputStream(resource)) {
+                ZipEntry entry;
+                while ((entry = zip.getNextEntry()) != null) {
+                    if (entry.isDirectory() || !entry.getName().toLowerCase(Locale.ROOT).endsWith(".tml")) continue;
+                    Path target = root.resolve(entry.getName()).normalize();
+                    if (!target.startsWith(root)) throw new IOException("Unsafe template path: " + entry.getName());
+                    Files.createDirectories(target.getParent());
+                    if (Files.notExists(target)) {
+                        // Never replace a template the player edited.
+                        Files.copy(zip, target);
+                        installed++;
+                    }
+                    zip.closeEntry();
+                }
+            }
+            LOG.info("Installed {} bundled Ruins templates into {}", installed, root);
+        } catch (IOException e) { LOG.error("Could not install bundled Ruins templates", e); }
     }
 
     static List<TmlTemplate> templates() {

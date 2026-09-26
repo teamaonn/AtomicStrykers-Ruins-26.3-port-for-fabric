@@ -2,6 +2,8 @@
 
 This is an experimental independent Fabric implementation of the documented Ruins `.tml` text format. It does not contain AtomicStryker's code or template library. Keep the original NeoForge mod out of the Fabric mods folder. Extract your own `.tml` files to `config/ruins_config/generic/` or a biome named subfolder.
 
+The loader also supports an optional personal `ruins_defaults.zip` resource in the built JAR. On first launch it copies `.tml` files from that pack into `config/ruins_config/`, without overwriting any existing files. The public repository and its CI artifact do not bundle the original templates.
+
 ## Current behavior
 
 - Reads dimensions, layers, rule selection chances, block states, relative weight, and biome/dimension identifiers from `.tml` files.
