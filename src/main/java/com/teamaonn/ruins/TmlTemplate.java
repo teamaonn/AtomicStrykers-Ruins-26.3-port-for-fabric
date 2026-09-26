@@ -6,10 +6,14 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtUtils;
 import net.minecraft.nbt.TagParser;
+import net.minecraft.resources.Identifier;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.Rotation;
+import net.minecraft.world.level.block.entity.RandomizableContainerBlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.storage.loot.LootTable;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -147,9 +151,35 @@ public final class TmlTemplate {
             BlockPos target = base.offset(dx, y, dz);
             if (target.getY() > world.getMinY() && target.getY() < world.getMinY() + world.getHeight()) {
                 world.setBlock(target, state, 3);
+                if (world.getBlockEntity(target) instanceof RandomizableContainerBlockEntity container) {
+                    String table = lootTable(tag);
+                    if (table == null) table = defaultLootTable();
+                    try {
+                        ResourceKey<LootTable> key = ResourceKey.create(Registries.LOOT_TABLE, Identifier.parse(table));
+                        container.setLootTable(key, world.getRandom().nextLong());
+                        container.setChanged();
+                    } catch (IllegalArgumentException e) {
+                        RuinsFabric.LOG.warn("Invalid loot table {} in {}", table, name);
+                    }
+                }
                 placed++;
             }
         }
         return placed;
+    }
+
+    private static String lootTable(CompoundTag block) {
+        CompoundTag entity = block.getCompound("Ruins").flatMap(ruins -> ruins.getCompound("entity")).orElse(null);
+        if (entity == null) return null;
+        String direct = entity.getString("LootTable").orElse(null);
+        if (direct != null && !direct.isBlank()) return direct;
+        return entity.getCompound("ForgeData").flatMap(data -> data.getString("LootTable")).orElse(null);
+    }
+
+    private String defaultLootTable() {
+        String lower = name.toLowerCase(Locale.ROOT);
+        if (lower.contains("nether")) return "minecraft:chests/nether_bridge";
+        if (lower.contains("pirate") || lower.contains("ship")) return "minecraft:chests/shipwreck_supply";
+        return "minecraft:chests/simple_dungeon";
     }
 }
