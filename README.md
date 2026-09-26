@@ -9,7 +9,7 @@ The loader also supports an optional personal `ruins_defaults.zip` resource in t
 - Reads dimensions, layers, rule selection chances, block states, relative weight, and biome/dimension identifiers from `.tml` files.
 - `/ruinsfabric reload` scans the config folder; `/ruinsfabric list` shows template names.
 - `/testruin generic/tikihead1` places a template at the command user's position. Commands require admin permission and change blocks directly. Test in a disposable world first.
-- Natural generation checks loaded chunks four chunks ahead of players. It filters templates by biome and dimension, selects by weight, checks a sample of the terrain, then places one at a default chance of 1 in 48 eligible chunks. Processed chunks and generated positions are saved under the world folder in `ruins_fabric/`, preventing duplicate generation after a restart. Settings in `config/ruins_fabric.properties` are read at server start.
+- Natural generation checks loaded chunks four chunks ahead of players. It filters templates by biome and dimension, selects by weight, checks a sample of the terrain, then places one at a default chance of 1 in 20 eligible chunks. Processed chunks and generated positions are saved under the world folder in `ruins_fabric/`, preventing duplicate generation after a restart. Settings in `config/ruins_fabric.properties` are read at server start. An unchanged previous default config of 1 in 48 is upgraded automatically.
 
 ## Known gaps
 

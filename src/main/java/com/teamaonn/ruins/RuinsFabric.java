@@ -39,7 +39,7 @@ public final class RuinsFabric implements ModInitializer {
         CommandRegistrationCallback.EVENT.register((dispatcher, registry, environment) -> {
             dispatcher.register(Commands.literal("testruin")
                 .requires(source -> source.permissions().hasPermission(Permissions.COMMANDS_ADMIN))
-                .then(Commands.argument("template", StringArgumentType.string()).executes(ctx -> {
+                .then(Commands.argument("template", StringArgumentType.greedyString()).executes(ctx -> {
                     String name = StringArgumentType.getString(ctx, "template").toLowerCase(Locale.ROOT);
                     TmlTemplate template = TEMPLATES.get(name);
                     if (template == null) {

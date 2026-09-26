@@ -25,7 +25,7 @@ final class NaturalSpawn {
     private final Map<String, Set<Long>> processed = new HashMap<>();
     private final Map<String, List<BlockPos>> previous = new HashMap<>();
     private int ticks, cursor;
-    private int chance = 48;
+    private int chance = 20;
     private int minimumDistance = 128;
     private boolean configLoaded;
 
@@ -111,12 +111,13 @@ final class NaturalSpawn {
         configLoaded = true;
         Path path = FabricLoader.getInstance().getConfigDir().resolve("ruins_fabric.properties");
         try {
-            if (!Files.exists(path)) Files.writeString(path,
-                    "# Natural generation in loaded chunks ahead of players. Restart to apply changes.\n" +
-                    "spawnChanceDenominator=48\nminimumDistanceBlocks=128\n");
+            String header = "# Natural generation in loaded chunks ahead of players. Restart to apply changes.\n";
+            String oldDefault = header + "spawnChanceDenominator=48\nminimumDistanceBlocks=128\n";
+            String newDefault = header + "spawnChanceDenominator=20\nminimumDistanceBlocks=128\n";
+            if (!Files.exists(path) || Files.readString(path).equals(oldDefault)) Files.writeString(path, newDefault);
             var props = new java.util.Properties();
             try (var stream = Files.newInputStream(path)) { props.load(stream); }
-            chance = Math.max(1, Integer.parseInt(props.getProperty("spawnChanceDenominator", "48")));
+            chance = Math.max(1, Integer.parseInt(props.getProperty("spawnChanceDenominator", "20")));
             minimumDistance = Math.max(0, Integer.parseInt(props.getProperty("minimumDistanceBlocks", "128")));
         } catch (Exception e) { RuinsFabric.LOG.warn("Could not read natural generation settings", e); }
     }
