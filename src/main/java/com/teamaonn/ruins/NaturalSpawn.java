@@ -5,7 +5,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.storage.LevelResource;
 
@@ -45,11 +44,11 @@ final class NaturalSpawn {
         int[] offset = RING[cursor++ % RING.length];
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
             ServerLevel world = player.level();
-            ChunkPos playerChunk = new ChunkPos(player.blockPosition());
-            int cx = playerChunk.x + offset[0], cz = playerChunk.z + offset[1];
+            int cx = (player.blockPosition().getX() >> 4) + offset[0];
+            int cz = (player.blockPosition().getZ() >> 4) + offset[1];
             if (!world.hasChunk(cx, cz)) continue;
             String dimension = world.dimension().identifier().toString();
-            long key = ChunkPos.asLong(cx, cz);
+            long key = key(cx, cz);
             Set<Long> done = processed.computeIfAbsent(dimension, d -> loadProcessed(server, d));
             if (done.contains(key)) continue;
             int x = (cx << 4) + 8, z = (cz << 4) + 8;
@@ -135,7 +134,7 @@ final class NaturalSpawn {
         try {
             for (String line : Files.readAllLines(file)) {
                 String[] parts = line.split(",");
-                if (parts.length == 3 && parts[0].equals("C")) done.add(ChunkPos.asLong(Integer.parseInt(parts[1]), Integer.parseInt(parts[2])));
+                if (parts.length == 3 && parts[0].equals("C")) done.add(key(Integer.parseInt(parts[1]), Integer.parseInt(parts[2])));
                 if (parts.length == 4 && parts[0].equals("P")) sites.add(new BlockPos(Integer.parseInt(parts[1]), Integer.parseInt(parts[2]), Integer.parseInt(parts[3])));
             }
         } catch (Exception e) { RuinsFabric.LOG.warn("Could not load generation history from {}", file, e); }
@@ -155,5 +154,9 @@ final class NaturalSpawn {
         for (int x = -radius; x <= radius; x++) for (int z = -radius; z <= radius; z++)
             if (Math.max(Math.abs(x), Math.abs(z)) == radius) offsets.add(new int[]{x, z});
         return offsets.toArray(int[][]::new);
+    }
+
+    private static long key(int x, int z) {
+        return ((long) x << 32) | (z & 0xffffffffL);
     }
 }
