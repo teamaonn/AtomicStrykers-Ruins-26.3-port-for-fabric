@@ -1,17 +1,17 @@
 # Ruins template loader for Fabric 26.3 (experimental source)
 
-This is the first stage of an independent Fabric implementation of the documented Ruins `.tml` text format. It does not contain AtomicStryker's code or template library. Keep the original NeoForge mod out of the Fabric mods folder. Extract your own `.tml` files to `config/ruins_config/generic/` or a biome named subfolder.
+This is an experimental independent Fabric implementation of the documented Ruins `.tml` text format. It does not contain AtomicStryker's code or template library. Keep the original NeoForge mod out of the Fabric mods folder. Extract your own `.tml` files to `config/ruins_config/generic/` or a biome named subfolder.
 
 ## Current behavior
 
 - Reads dimensions, layers, rule selection chances, block states, relative weight, and biome/dimension identifiers from `.tml` files.
 - `/ruinsfabric reload` scans the config folder; `/ruinsfabric list` shows template names.
 - `/testruin generic/tikihead1` places a template at the command user's position. Commands require admin permission and change blocks directly. Test in a disposable world first.
-- No automatic random spawning is enabled yet. Cristel Lib's structure-set controls apply to registered vanilla structures, not these runtime `.tml` files.
+- Natural generation checks loaded chunks four chunks ahead of players. It filters templates by biome and dimension, selects by weight, checks a sample of the terrain, then places one at a default chance of 1 in 48 eligible chunks. Processed chunks and generated positions are saved under the world folder in `ruins_fabric/`, preventing duplicate generation after a restart. Settings in `config/ruins_fabric.properties` are read at server start.
 
 ## Known gaps
 
-This early implementation does not apply terrain leveling, site acceptance, structure spacing, adjoining templates, block-entity NBT, spawner contents, loot tables, structure parsing, or all variant rule modes. These require their own implementation and world tests. The supplied 25 `.tml` layouts were checked for layer dimensions. The GitHub Actions build checks compilation; this still requires an in-game placement test before release. Do not present this source as a ready-to-install mod JAR.
+This early implementation samples terrain but does not level it or apply all original site acceptance rules. It does not support adjoining templates, block-entity NBT, spawner contents, loot tables, structure parsing, or all variant rule modes. The supplied 25 `.tml` layouts were checked for layer dimensions. GitHub Actions checks compilation, while natural placement still requires an in-game test. Use a disposable world for this experimental build.
 
 ## Build prerequisites
 

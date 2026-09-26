@@ -3,6 +3,8 @@ package com.teamaonn.ruins;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
@@ -15,15 +17,20 @@ import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.List;
+import java.util.ArrayList;
 
 public final class RuinsFabric implements ModInitializer {
     static final Logger LOG = LoggerFactory.getLogger("ruins_fabric");
     private static final Map<String, TmlTemplate> TEMPLATES = new HashMap<>();
     private static Path directory;
+    private final NaturalSpawn spawner = new NaturalSpawn();
 
     @Override public void onInitialize() {
         directory = net.fabricmc.loader.api.FabricLoader.getInstance().getConfigDir().resolve("ruins_config");
         reload();
+        ServerLifecycleEvents.SERVER_STARTED.register(server -> spawner.reset());
+        ServerTickEvents.END_SERVER_TICK.register(spawner::tick);
         CommandRegistrationCallback.EVENT.register((dispatcher, registry, environment) -> {
             dispatcher.register(Commands.literal("testruin")
                 .requires(source -> source.permissions().hasPermission(Permissions.COMMANDS_ADMIN))
@@ -51,6 +58,10 @@ public final class RuinsFabric implements ModInitializer {
                     return 1;
                 })));
         });
+    }
+
+    static List<TmlTemplate> templates() {
+        return new ArrayList<>(TEMPLATES.values());
     }
 
     private static void reload() {
