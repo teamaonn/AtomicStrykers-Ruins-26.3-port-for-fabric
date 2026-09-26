@@ -10,7 +10,7 @@ The loader also supports an optional personal `ruins_defaults.zip` resource in t
 - `/ruinsfabric reload` scans the config folder; `/ruinsfabric list` shows template names.
 - `/testruin generic/tikihead1` places a template at the command user's position. Commands require admin permission and change blocks directly. Test in a disposable world first.
 - Natural generation checks loaded chunks four chunks ahead of players. It filters templates by biome and dimension, selects by weight, checks a sample of the terrain, then places one at a default chance of 1 in 20 eligible chunks. Processed chunks and generated positions are saved under the world folder in `ruins_fabric/`, preventing duplicate generation after a restart. Settings in `config/ruins_fabric.properties` are read at server start. An unchanged previous default config of 1 in 48 is upgraded automatically.
-- Placed chests, trapped chests, and barrels receive a random loot-table seed. A template's `Ruins.entity.LootTable` or `Ruins.entity.ForgeData.LootTable` takes precedence; containers without one receive dungeon loot, with shipwreck supplies and Nether Fortress loot used for matching template names.
+- Placed chests, trapped chests, and barrels receive a random loot-table seed. In the supplied pirate ship, barrels use vanilla shipwreck supply loot and its two chest rules use vanilla shipwreck map and treasure loot. Other containers use the `Ruins.entity.LootTable` or `Ruins.entity.ForgeData.LootTable` specified by their template; otherwise they receive dungeon or matching Nether Fortress loot.
 
 ## Known gaps
 

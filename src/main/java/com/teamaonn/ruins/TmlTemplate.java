@@ -152,8 +152,7 @@ public final class TmlTemplate {
             if (target.getY() > world.getMinY() && target.getY() < world.getMinY() + world.getHeight()) {
                 world.setBlock(target, state, 3);
                 if (world.getBlockEntity(target) instanceof RandomizableContainerBlockEntity container) {
-                    String table = lootTable(tag);
-                    if (table == null) table = defaultLootTable();
+                    String table = chooseLootTable(tag, state, ruleId);
                     try {
                         ResourceKey<LootTable> key = ResourceKey.create(Registries.LOOT_TABLE, Identifier.parse(table));
                         container.setLootTable(key, world.getRandom().nextLong());
@@ -174,6 +173,17 @@ public final class TmlTemplate {
         String direct = entity.getString("LootTable").orElse(null);
         if (direct != null && !direct.isBlank()) return direct;
         return entity.getCompound("ForgeData").flatMap(data -> data.getString("LootTable")).orElse(null);
+    }
+
+    private String chooseLootTable(CompoundTag block, BlockState state, int ruleId) {
+        String lower = name.toLowerCase(Locale.ROOT);
+        if (lower.contains("pirate") || lower.contains("ship")) {
+            if (state.is(Blocks.BARREL)) return "minecraft:chests/shipwreck_supply";
+            // The two chest rules in the supplied pirate ship become map and treasure chests.
+            return ruleId == 5 ? "minecraft:chests/shipwreck_map" : "minecraft:chests/shipwreck_treasure";
+        }
+        String specified = lootTable(block);
+        return specified != null && !specified.isBlank() ? specified : defaultLootTable();
     }
 
     private String defaultLootTable() {
