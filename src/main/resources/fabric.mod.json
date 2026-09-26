@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "id": "ruins_fabric",
+  "version": "${version}",
+  "name": "Ruins Template Loader for Fabric",
+  "description": "Loads local Ruins .tml templates and places them in the world.",
+  "authors": ["Teamaonn"],
+  "environment": "*",
+  "entrypoints": {"main": ["com.teamaonn.ruins.RuinsFabric"]},
+  "depends": {"fabricloader": ">=0.19.5", "minecraft": "=26.3", "fabric-api": "*"}
+}
