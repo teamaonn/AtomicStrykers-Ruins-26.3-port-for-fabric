@@ -19,47 +19,53 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/** Inspects already loaded chunks ahead of players, without requesting new chunks. */
+/** Generation candidates originate exclusively from newly generated chunks. */
 final class NaturalSpawn {
-    private static final int[][] RING = makeRing(4);
     private final Map<String, Set<Long>> processed = new HashMap<>();
     private final Map<String, List<BlockPos>> previous = new HashMap<>();
-    private int ticks, cursor;
-    private int chance = 20;
-    private int minimumDistance = 128;
+    private final Map<String, Map<Long, Integer>> fresh = new HashMap<>();
+    private final List<Candidate> pending = new ArrayList<>();
+    private record Candidate(ServerLevel world, int cx, int cz, int expires) {}
+    private int ticks;
+    private int chance = 40;
+    private int minimumDistance = 256;
     private boolean configLoaded;
 
     void reset() {
-        processed.clear();
-        previous.clear();
-        ticks = cursor = 0;
-        configLoaded = false;
+        processed.clear(); previous.clear(); fresh.clear(); pending.clear();
+        ticks = 0; configLoaded = false;
+    }
+
+    void onChunkLoad(ServerLevel world, net.minecraft.world.level.chunk.LevelChunk chunk, boolean generated) {
+        if (!generated) return;
+        MinecraftServer server = world.getServer();
+        if (!configLoaded) loadConfig();
+        String dimension = world.dimension().identifier().toString();
+        int cx = chunk.getPos().x(), cz = chunk.getPos().z();
+        long key = key(cx, cz);
+        Set<Long> done = processed.computeIfAbsent(dimension, d -> loadProcessed(server, d));
+        if (!done.add(key)) return;
+        remember(server, dimension, "C," + cx + "," + cz);
+        fresh.computeIfAbsent(dimension, d -> new HashMap<>()).put(key, ticks + 200);
+        if (world.getRandom().nextInt(chance) == 0) pending.add(new Candidate(world, cx, cz, ticks + 100));
     }
 
     void tick(MinecraftServer server) {
-        if (++ticks % 20 != 0) return;
-        if (!configLoaded) loadConfig();
-        List<TmlTemplate> installed = RuinsFabric.templates();
-        if (installed.isEmpty()) return;
-        int[] offset = RING[cursor++ % RING.length];
-        for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-            ServerLevel world = player.level();
-            int cx = (player.blockPosition().getX() >> 4) + offset[0];
-            int cz = (player.blockPosition().getZ() >> 4) + offset[1];
-            if (!world.hasChunk(cx, cz)) continue;
-            String dimension = world.dimension().identifier().toString();
-            long key = key(cx, cz);
-            Set<Long> done = processed.computeIfAbsent(dimension, d -> loadProcessed(server, d));
-            if (done.contains(key)) continue;
-            int x = (cx << 4) + 8, z = (cz << 4) + 8;
-            int y = world.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
-            BlockPos center = new BlockPos(x, y, z);
-            List<TmlTemplate> eligible = installed.stream().filter(t -> t.appliesTo(world, center)).toList();
+        ticks++;
+        for (var chunks : fresh.values()) chunks.values().removeIf(expiry -> expiry < ticks);
+        // Callbacks caused during placement must not mutate the iterator.
+        List<Candidate> work = new ArrayList<>(pending);
+        pending.clear();
+        for (Candidate candidate : work) {
+            if (candidate.expires < ticks) continue;
+            ServerLevel world = candidate.world;
+            int x = (candidate.cx << 4) + 8, z = (candidate.cz << 4) + 8;
+            if (!world.hasChunk(candidate.cx, candidate.cz)) continue;
+            BlockPos center = new BlockPos(x, world.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z), z);
+            List<TmlTemplate> eligible = RuinsFabric.templates().stream().filter(t -> t.appliesTo(world, center)).toList();
             if (eligible.isEmpty()) continue;
-            // Mark before placing so re-entrancy or an invalid site cannot create duplicates.
-            done.add(key);
-            remember(server, dimension, "C," + cx + "," + cz);
-            if (world.getRandom().nextInt(chance) != 0) continue;
+            // Wait briefly for adjacent fresh terrain; never revisit old terrain later.
+            if (candidate.expires - ticks > 60) { pending.add(candidate); continue; }
             int total = eligible.stream().mapToInt(t -> t.weight).sum();
             int pick = world.getRandom().nextInt(total);
             TmlTemplate selected = eligible.getFirst();
@@ -67,13 +73,28 @@ final class NaturalSpawn {
                 pick -= template.weight;
                 if (pick < 0) { selected = template; break; }
             }
-            int baseX = x - selected.columns / 2;
-            int baseZ = z - selected.rows / 2;
-            BlockPos base = safeSite(world, selected, baseX, baseZ);
+            int rotation = selected.preventRotation ? 0 : world.getRandom().nextInt(4);
+            int width = rotation % 2 == 0 ? selected.rows : selected.columns;
+            int depth = rotation % 2 == 0 ? selected.columns : selected.rows;
+            // Place the rotated template around the candidate chunk's center.
+            int baseX = x + (rotation == 1 || rotation == 2 ? width / 2 : -width / 2);
+            int baseZ = z + (rotation == 2 || rotation == 3 ? depth / 2 : -depth / 2);
+            int minX = baseX - (rotation == 1 || rotation == 2 ? width - 1 : 0);
+            int minZ = baseZ - (rotation == 2 || rotation == 3 ? depth - 1 : 0);
+            String dimension = world.dimension().identifier().toString();
+            Map<Long, Integer> chunks = fresh.getOrDefault(dimension, Map.of());
+            boolean safe = true;
+            for (int cx = minX >> 4; cx <= (minX + width - 1) >> 4; cx++)
+                for (int cz = minZ >> 4; cz <= (minZ + depth - 1) >> 4; cz++)
+                    if (!chunks.containsKey(key(cx, cz)) || !world.hasChunk(cx, cz)) safe = false;
+            if (!safe) continue;
+            // Avoid visible pop-in and terrain where a player is already working.
+            if (world.players().stream().anyMatch(p -> Math.abs(p.getX() - x) < width / 2.0 + 64
+                    && Math.abs(p.getZ() - z) < depth / 2.0 + 64)) continue;
+            BlockPos base = safeSite(world, selected, baseX, baseZ, minX, minZ, width, depth);
             if (base == null) continue;
             List<BlockPos> sites = previous.computeIfAbsent(dimension, d -> new ArrayList<>());
-            if (sites.stream().anyMatch(p -> p.distSqr(base) < (long) minimumDistance * minimumDistance)) continue;
-            int rotation = selected.preventRotation ? 0 : world.getRandom().nextInt(4);
+            if (sites.stream().anyMatch(p -> horizontalDistanceSquared(p, base) < (long) minimumDistance * minimumDistance)) continue;
             int count = selected.place(world, base, rotation);
             if (count > 0) {
                 sites.add(base);
@@ -83,42 +104,39 @@ final class NaturalSpawn {
         }
     }
 
-    private static BlockPos safeSite(ServerLevel world, TmlTemplate template, int x, int z) {
-        int extent = Math.max(template.columns, template.rows);
-        // The chosen rotation can extend in either horizontal direction.
-        for (int px = x - extent; px <= x + extent; px += 16)
-            for (int pz = z - extent; pz <= z + extent; pz += 16)
-                if (!world.hasChunk(px >> 4, pz >> 4)) return null;
-        if (!world.hasChunk((x + extent) >> 4, (z + extent) >> 4)) return null;
+    private static long horizontalDistanceSquared(BlockPos a, BlockPos b) {
+        long dx = (long)a.getX() - b.getX(), dz = (long)a.getZ() - b.getZ();
+        return dx * dx + dz * dz;
+    }
+
+    private static BlockPos safeSite(ServerLevel world, TmlTemplate template, int baseX, int baseZ,
+                                     int minX, int minZ, int width, int depth) {
         int low = Integer.MAX_VALUE, high = Integer.MIN_VALUE;
-        int[][] samples = {{x, z}, {x + template.columns, z}, {x, z + template.rows},
-                {x + template.columns, z + template.rows}, {x + template.columns / 2, z + template.rows / 2}};
-        for (int[] sample : samples) {
-            int surface = world.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, sample[0], sample[1]);
-            if (surface <= world.getMinY() + 1) return null;
-            BlockPos ground = new BlockPos(sample[0], surface - 1, sample[1]);
-            if (!world.getBlockState(ground).getFluidState().isEmpty()) return null;
-            low = Math.min(low, surface);
-            high = Math.max(high, surface);
+        for (int x = minX; x < minX + width; x++) for (int z = minZ; z < minZ + depth; z++) {
+            int surface = world.getHeight(Heightmap.Types.MOTION_BLOCKING_NO_LEAVES, x, z);
+            if (surface <= world.getMinY() + 1 || !template.acceptsGround(world.getBlockState(new BlockPos(x, surface - 1, z)))) return null;
+            low = Math.min(low, surface); high = Math.max(high, surface);
         }
         if (high - low > Math.max(0, template.maxLeveling)) return null;
-        int y = low - template.embed;
+        int offset = template.minHeightOffset + world.getRandom().nextInt(template.maxHeightOffset - template.minHeightOffset + 1);
+        int y = low - template.embed + offset;
         if (y <= world.getMinY() || y + template.height >= world.getMinY() + world.getHeight()) return null;
-        return new BlockPos(x, y, z);
+        return new BlockPos(baseX, y, baseZ);
     }
 
     private void loadConfig() {
         configLoaded = true;
         Path path = FabricLoader.getInstance().getConfigDir().resolve("ruins_fabric.properties");
         try {
-            String header = "# Natural generation in loaded chunks ahead of players. Restart to apply changes.\n";
-            String oldDefault = header + "spawnChanceDenominator=48\nminimumDistanceBlocks=128\n";
-            String newDefault = header + "spawnChanceDenominator=20\nminimumDistanceBlocks=128\n";
-            if (!Files.exists(path) || Files.readString(path).equals(oldDefault)) Files.writeString(path, newDefault);
+            String header = "# Natural generation in newly generated chunks only. Restart to apply changes.\n";
+            String legacyHeader = "# Natural generation in loaded chunks ahead of players. Restart to apply changes.\n";
+            String oldDefault = legacyHeader + "spawnChanceDenominator=48\nminimumDistanceBlocks=128\n";
+            String newDefault = header + "spawnChanceDenominator=40\nminimumDistanceBlocks=256\n";
+            if (!Files.exists(path) || Files.readString(path).equals(oldDefault) || Files.readString(path).equals(legacyHeader + "spawnChanceDenominator=20\nminimumDistanceBlocks=128\n")) Files.writeString(path, newDefault);
             var props = new java.util.Properties();
             try (var stream = Files.newInputStream(path)) { props.load(stream); }
-            chance = Math.max(1, Integer.parseInt(props.getProperty("spawnChanceDenominator", "20")));
-            minimumDistance = Math.max(0, Integer.parseInt(props.getProperty("minimumDistanceBlocks", "128")));
+            chance = Math.max(1, Integer.parseInt(props.getProperty("spawnChanceDenominator", "40")));
+            minimumDistance = Math.max(0, Integer.parseInt(props.getProperty("minimumDistanceBlocks", "256")));
         } catch (Exception e) { RuinsFabric.LOG.warn("Could not read natural generation settings", e); }
     }
 
@@ -148,13 +166,6 @@ final class NaturalSpawn {
             Files.createDirectories(file.getParent());
             Files.writeString(file, line + "\n", StandardOpenOption.CREATE, StandardOpenOption.APPEND);
         } catch (IOException e) { RuinsFabric.LOG.error("Could not save generation history to {}", file, e); }
-    }
-
-    private static int[][] makeRing(int radius) {
-        List<int[]> offsets = new ArrayList<>();
-        for (int x = -radius; x <= radius; x++) for (int z = -radius; z <= radius; z++)
-            if (Math.max(Math.abs(x), Math.abs(z)) == radius) offsets.add(new int[]{x, z});
-        return offsets.toArray(int[][]::new);
     }
 
     private static long key(int x, int z) {
