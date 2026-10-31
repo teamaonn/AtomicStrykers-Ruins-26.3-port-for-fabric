@@ -36,6 +36,7 @@ public final class RuinsFabric implements ModInitializer {
         reload();
         ServerLifecycleEvents.SERVER_STARTED.register(server -> spawner.reset());
         ServerTickEvents.END_SERVER_TICK.register(spawner::tick);
+        net.fabricmc.fabric.api.event.lifecycle.v1.ServerChunkEvents.CHUNK_LOAD.register(spawner::onChunkLoad);
         CommandRegistrationCallback.EVENT.register((dispatcher, registry, environment) -> {
             dispatcher.register(Commands.literal("testruin")
                 .requires(source -> source.permissions().hasPermission(Permissions.COMMANDS_ADMIN))

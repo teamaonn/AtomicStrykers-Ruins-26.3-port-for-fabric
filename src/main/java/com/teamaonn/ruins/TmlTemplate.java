@@ -26,6 +26,8 @@ public final class TmlTemplate {
     public final String folder;
     public final int height, rows, columns, weight, embed, maxLeveling;
     public final boolean preventRotation;
+    public final int minHeightOffset, maxHeightOffset;
+    private final Set<String> acceptableGround, unacceptableGround;
     public final Set<String> dimensions, biomes;
     private final Map<Integer, Rule> rules;
     private final int[][][] layers;
@@ -50,6 +52,12 @@ public final class TmlTemplate {
             for (int[] row : layer) if (row.length != columns) throw new IllegalArgumentException("wrong column count");
         }
         weight = Math.max(1, Integer.parseInt(fields.getOrDefault("weight", "1").trim()));
+        String[] offset = fields.getOrDefault("random_height_offset", "0,0").split(",");
+        int a = Integer.parseInt(offset[0].trim()), b = Integer.parseInt(offset[offset.length - 1].trim());
+        minHeightOffset = Math.min(a, b);
+        maxHeightOffset = Math.max(a, b);
+        acceptableGround = blockIds(fields.getOrDefault("acceptable_target_blocks", ""));
+        unacceptableGround = blockIds(fields.getOrDefault("unacceptable_target_blocks", ""));
         embed = Integer.parseInt(fields.getOrDefault("embed_into_distance", "0").trim());
         maxLeveling = Integer.parseInt(fields.getOrDefault("max_leveling", "2").trim());
         preventRotation = "1".equals(fields.getOrDefault("preventRotation", "0").trim());
@@ -57,6 +65,20 @@ public final class TmlTemplate {
         biomes = commaSet(fields.getOrDefault("biomesToSpawnIn", ""));
         this.rules = Map.copyOf(rules);
         this.layers = layers;
+    }
+
+    private static Set<String> blockIds(String text) {
+        Set<String> ids = new HashSet<>();
+        for (CompoundTag tag : splitCompounds(text)) {
+            String id = tag.getString("Name").orElseGet(() -> tag.getString("id").orElse(""));
+            if (!id.isEmpty()) ids.add(id);
+        }
+        return Set.copyOf(ids);
+    }
+
+    public boolean acceptsGround(BlockState state) {
+        String id = net.minecraft.core.registries.BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
+        return (acceptableGround.isEmpty() || acceptableGround.contains(id)) && !unacceptableGround.contains(id);
     }
 
     private static Set<String> commaSet(String s) {
@@ -125,7 +147,7 @@ public final class TmlTemplate {
         String dimension = world.dimension().identifier().getPath().toLowerCase(Locale.ROOT);
         if (!dimensions.isEmpty() && !dimensions.contains(dimension)) return false;
         String biome = world.getBiome(pos).unwrapKey().map(k -> k.identifier().getPath()).orElse("").toLowerCase(Locale.ROOT);
-        return folder.equals("generic") || folder.equals(biome) || biomes.contains(biome);
+        return (folder.equals("generic") && biomes.isEmpty()) || folder.equals(biome) || biomes.contains(biome);
     }
 
     public int place(ServerLevel world, BlockPos base, int turns) {
@@ -137,20 +159,26 @@ public final class TmlTemplate {
             default -> Rotation.NONE;
         };
         Random random = new Random(world.getRandom().nextLong());
+        List<BlockPos> changed = new ArrayList<>();
         for (int y = 0; y < height; y++) for (int z = 0; z < rows; z++) for (int x = 0; x < columns; x++) {
             int ruleId = layers[y][z][x];
             if (ruleId == 0) continue;
             Rule rule = rules.get(ruleId);
             if (rule == null || random.nextInt(100) >= rule.chance()) continue;
             CompoundTag tag = rule.alternatives().get(random.nextInt(rule.alternatives().size()));
-            BlockState state = NbtUtils.readBlockState(world.holderLookup(Registries.BLOCK), tag);
+            CompoundTag stateTag = normalizeBlockTag(tag);
+            BlockState state = NbtUtils.readBlockState(world.holderLookup(Registries.BLOCK), stateTag);
             if (state.is(Blocks.AIR) && !tag.toString().contains("minecraft:air")) continue;
             state = state.rotate(rotation);
-            int dx = switch (Math.floorMod(turns, 4)) { case 1 -> -z; case 2 -> -x; case 3 -> z; default -> x; };
-            int dz = switch (Math.floorMod(turns, 4)) { case 1 -> x; case 2 -> -z; case 3 -> -x; default -> z; };
+            int dx = switch (Math.floorMod(turns, 4)) { case 1 -> -x; case 2 -> -z; case 3 -> x; default -> z; };
+            int dz = switch (Math.floorMod(turns, 4)) { case 1 -> z; case 2 -> -x; case 3 -> -z; default -> x; };
             BlockPos target = base.offset(dx, y, dz);
             if (target.getY() > world.getMinY() && target.getY() < world.getMinY() + world.getHeight()) {
-                world.setBlock(target, state, 3);
+                // Ruins rows run along world X; columns run along world Z.
+                // Defer neighbor/shape updates until both halves and their supports exist.
+                world.setBlock(target, state, 2 | 16);
+                changed.add(target);
+                initializeSpawner(world, target, tag);
                 if (world.getBlockEntity(target) instanceof RandomizableContainerBlockEntity container) {
                     String table = chooseLootTable(tag, state, ruleId);
                     try {
@@ -164,7 +192,40 @@ public final class TmlTemplate {
                 placed++;
             }
         }
+        for (BlockPos pos : changed) {
+            BlockState state = world.getBlockState(pos);
+            BlockState updated = net.minecraft.world.level.block.Block.updateFromNeighbourShapes(state, world, pos);
+            if (updated != state) world.setBlock(pos, updated, 2 | 16);
+        }
         return placed;
+    }
+
+    static CompoundTag normalizeBlockTag(CompoundTag tag) {
+        CompoundTag normalized = tag.copy();
+        if (!normalized.contains("id")) tag.getString("Name").ifPresent(id -> normalized.putString("id", id));
+        normalized.getString("id").ifPresent(id -> normalized.putString("id", switch (id) {
+            case "minecraft:grass_path" -> "minecraft:dirt_path";
+            case "minecraft:grass" -> "minecraft:short_grass";
+            default -> id;
+        }));
+        if (!normalized.contains("properties")) tag.getCompound("Properties").ifPresent(p -> normalized.put("properties", p.copy()));
+        return normalized;
+    }
+
+    private static void initializeSpawner(ServerLevel world, BlockPos pos, CompoundTag tag) {
+        if (!(world.getBlockEntity(pos) instanceof net.minecraft.world.level.block.entity.SpawnerBlockEntity spawner)) return;
+        CompoundTag entity = tag.getCompound("Ruins").flatMap(t -> t.getCompound("entity")).orElse(null);
+        if (entity == null) return;
+        CompoundTag data = entity.copy();
+        if (!data.contains("SpawnData")) {
+            data.getList("SpawnPotentials").ifPresent(potentials -> {
+                if (!potentials.isEmpty() && potentials.get(0) instanceof CompoundTag first)
+                    first.getCompound("data").ifPresent(spawnData -> data.put("SpawnData", spawnData.copy()));
+            });
+        }
+        spawner.loadWithComponents(net.minecraft.world.level.storage.TagValueInput.create(net.minecraft.util.ProblemReporter.DISCARDING, world.registryAccess(), data));
+        spawner.setChanged();
+        world.sendBlockUpdated(pos, world.getBlockState(pos), world.getBlockState(pos), 3);
     }
 
     private static String lootTable(CompoundTag block) {
